@@ -1,17 +1,21 @@
+import os
 import psycopg2
 from psycopg2 import OperationalError
 
+DB_NAME = os.getenv("DB_NAME", "demo")
+DB_USER = os.getenv("DB_USER", "demo")
+DB_PASSWORD = os.getenv("DB_PASSWORD", "password")
+DB_HOST = os.getenv("DB_HOST", "localhost")
+DB_PORT = os.getenv("DB_PORT", 5432)
+
 def get_conn():
-    """
-    Connect to local Postgres database. Replace values with your DB credentials.
-    """
     try:
         conn = psycopg2.connect(
-            host="localhost",           # or your EC2 host / Docker service
-            port=5432,
-            database="postgres",
-            user="myuser02",
-            password="password"
+            host=DB_HOST,
+            port=DB_PORT,
+            database=DB_NAME,
+            user=DB_USER,
+            password=DB_PASSWORD
         )
         return conn
     except OperationalError as e:

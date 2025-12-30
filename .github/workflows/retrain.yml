@@ -1,11 +1,30 @@
 name: Retrain MLOps Model
 
+# Run manually or weekly
 on:
   workflow_dispatch: # manual trigger
+  schedule:
+    - cron: "0 2 * * 0" # every Sunday at 2AM UTC (optional)
 
 jobs:
   retrain:
     runs-on: ubuntu-latest
+
+    # Postgres service for Actions
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_DB: demo
+          POSTGRES_USER: demo
+          POSTGRES_PASSWORD: password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U demo"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
 
     steps:
       - name: Checkout repository
@@ -23,17 +42,26 @@ jobs:
           pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Seed synthetic data
+      - name: Seed synthetic data (workflow table)
         run: |
           source venv/bin/activate
+          export WORKFLOW_TABLE=workflow_user_events
           python -m scripts.seed_data
 
-      - name: Retrain model
+      - name: Retrain model (workflow table)
         run: |
           source venv/bin/activate
+          export WORKFLOW_TABLE=workflow_user_events
           python -m scripts.train
 
-      - name: Test inference
+      - name: Test inference (workflow table)
         run: |
           source venv/bin/activate
+          export WORKFLOW_TABLE=workflow_user_events
           python -m scripts.inference
+
+      - name: Upload trained model as artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: mlops-model
+          path: ../models/**/model.pkl
