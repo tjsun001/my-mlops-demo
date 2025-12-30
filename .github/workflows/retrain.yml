@@ -1,4 +1,4 @@
-name: MLops Workflow (No Retraining)
+name: MLops Weekly Retrain
 
 on:
   push:
@@ -6,10 +6,10 @@ on:
       - main
   workflow_dispatch:
   schedule:
-    - cron: '0 13 * * 0'  # Every Sunday 8:00 a.m. EST → 13:00 UTC
+    - cron: '0 13 * * 0'  # Every Sunday 8am EST → 13:00 UTC
 
 jobs:
-  setup-and-seed:
+  seed-and-train:
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -21,7 +21,7 @@ jobs:
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U myuser"
+          --health-cmd "pg_isready -U demo"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
@@ -44,7 +44,7 @@ jobs:
 
       - name: Wait for Postgres
         run: |
-          until pg_isready -h localhost -p 5432 -U myuser; do
+          until pg_isready -h localhost -p 5432 -U demo; do
             echo "Waiting for Postgres..."
             sleep 2
           done
@@ -62,11 +62,24 @@ jobs:
           PYTHONPATH: ${{ github.workspace }}
           WORKFLOW_TABLE: user_events
 
-      - name: Upload artifacts (optional)
+      - name: Train / Retrain model
+        run: |
+          source venv/bin/activate
+          python scripts/train.py
+        env:
+          POSTGRES_USER: demo
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: demo
+          POSTGRES_HOST: localhost
+          POSTGRES_PORT: 5432
+          PYTHONPATH: ${{ github.workspace }}
+          WORKFLOW_TABLE: user_events
+
+      - name: Upload trained model artifact
         uses: actions/upload-artifact@v4
         with:
-          name: mlops-artifacts
-          path: models/**/model.pkl   # will warn if no files
+          name: mlops-model
+          path: models/**/model.pkl
           if-no-files-found: warn
           compression-level: 6
           overwrite: false
