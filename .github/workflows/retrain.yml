@@ -15,9 +15,9 @@ jobs:
       postgres:
         image: postgres:15
         env:
-          POSTGRES_USER: myuser
-          POSTGRES_PASSWORD: mypassword
-          POSTGRES_DB: mydb
+          POSTGRES_USER: demo
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: demo
         ports:
           - 5432:5432
         options: >-
@@ -49,14 +49,14 @@ jobs:
             sleep 2
           done
 
-      - name: Retrain model
+      - name: Train model
         run: |
           source venv/bin/activate
-          python scripts/retrain_model.py  # replace with your retrain script
+          python scripts/train.py   # <-- Replace with your actual training script path
         env:
-          POSTGRES_USER: myuser
-          POSTGRES_PASSWORD: mypassword
-          POSTGRES_DB: mydb
+          POSTGRES_USER: demo
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: demo
           POSTGRES_HOST: localhost
           POSTGRES_PORT: 5432
           PYTHONPATH: ${{ github.workspace }}
