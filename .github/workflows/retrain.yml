@@ -61,7 +61,7 @@ jobs:
           python -m scripts.inference
 
       - name: Upload trained model as artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: mlops-model
           path: ../models/**/model.pkl
