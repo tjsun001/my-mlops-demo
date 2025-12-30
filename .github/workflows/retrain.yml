@@ -1,4 +1,8 @@
 name: MLops Weekly Retrain
+permissions:
+  id-token: write
+  contents: read
+
 
 on:
   push:
