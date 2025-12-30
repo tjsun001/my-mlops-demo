@@ -1,4 +1,4 @@
-name: MLops Retrain
+name: MLops Workflow (No Retraining)
 
 on:
   push:
@@ -9,19 +9,19 @@ on:
     - cron: '0 13 * * 0'  # Every Sunday 8:00 a.m. EST → 13:00 UTC
 
 jobs:
-  retrain:
+  setup-and-seed:
     runs-on: ubuntu-latest
     services:
       postgres:
         image: postgres:15
         env:
-          POSTGRES_USER: demo
-          POSTGRES_PASSWORD: password
-          POSTGRES_DB: demo
+          POSTGRES_USER: myuser
+          POSTGRES_PASSWORD: mypassword
+          POSTGRES_DB: mydb
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U demo"
+          --health-cmd "pg_isready -U myuser"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
@@ -44,28 +44,29 @@ jobs:
 
       - name: Wait for Postgres
         run: |
-          until pg_isready -h localhost -p 5432 -U demo; do
+          until pg_isready -h localhost -p 5432 -U myuser; do
             echo "Waiting for Postgres..."
             sleep 2
           done
 
-      - name: Train model
+      - name: Seed database tables
         run: |
           source venv/bin/activate
-          python scripts/train.py   # <-- Replace with your actual training script path
+          python scripts/seed_data.py
         env:
-          POSTGRES_USER: demo
-          POSTGRES_PASSWORD: password
-          POSTGRES_DB: demo
+          POSTGRES_USER: myuser
+          POSTGRES_PASSWORD: mypassword
+          POSTGRES_DB: mydb
           POSTGRES_HOST: localhost
           POSTGRES_PORT: 5432
           PYTHONPATH: ${{ github.workspace }}
+          WORKFLOW_TABLE: user_events
 
-      - name: Upload trained model artifact
+      - name: Upload artifacts (optional)
         uses: actions/upload-artifact@v4
         with:
-          name: mlops-model
-          path: models/**/model.pkl   # must be inside the repo workspace
+          name: mlops-artifacts
+          path: models/**/model.pkl   # will warn if no files
           if-no-files-found: warn
           compression-level: 6
           overwrite: false
