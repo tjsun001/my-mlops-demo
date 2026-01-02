@@ -2,8 +2,12 @@ from fastapi import FastAPI, Request
 from pydantic import BaseModel
 from pathlib import Path
 from contextlib import asynccontextmanager
-import pickle
 import threading
+from urllib.parse import urlparse
+import boto3
+import os
+import pickle
+from urllib.parse import urlparse
 
 ROOT = Path(__file__).resolve().parents[1]  # mlops/
 MODEL_PATH = ROOT / "models" / "model.pkl"
@@ -58,3 +62,30 @@ def reload_model(request: Request):
         "model_path": str(MODEL_PATH),
         "model_bytes": MODEL_PATH.stat().st_size,
     }
+
+
+
+MODEL = None
+
+def download_from_s3(s3_uri: str, local_path: str) -> str:
+    # s3://bucket/key
+    u = urlparse(s3_uri)
+    bucket = u.netloc
+    key = u.path.lstrip("/")
+    os.makedirs(os.path.dirname(local_path), exist_ok=True)
+
+    s3 = boto3.client("s3", region_name=os.getenv("AWS_REGION", "us-east-1"))
+    s3.download_file(bucket, key, local_path)
+    return local_path
+
+def load_model() -> None:
+    global MODEL
+    s3_uri = os.getenv("MODEL_S3_URI")
+    local_path = os.getenv("MODEL_LOCAL_PATH", "/tmp/model.pkl")
+
+    if s3_uri:
+        download_from_s3(s3_uri, local_path)
+
+    with open(local_path, "rb") as f:
+        MODEL = pickle.load(f)
+

@@ -3,3 +3,5 @@ psycopg2-binary
 scikit-learn
 mlflow
 requests
+boto3
+
