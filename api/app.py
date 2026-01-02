@@ -4,6 +4,7 @@ import hashlib
 import os
 import pickle
 import threading
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -13,10 +14,9 @@ import boto3
 from fastapi import FastAPI, Request
 from pydantic import BaseModel
 
-ROOT = Path(__file__).resolve().parents[1]  # repo root (my-mlops-demo/)
+ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_MODEL_PATH = ROOT / "models" / "model.pkl"
 
-# A lock to avoid concurrent reload/read issues
 model_lock = threading.Lock()
 
 
@@ -41,13 +41,26 @@ def file_sha256(path: Path) -> Optional[str]:
         return None
 
 
+def build_model_meta(model: Dict[str, Any], model_path: Path, loaded_ms: int) -> Dict[str, Any]:
+    # NOTE: compute ONCE here, not in /health
+    sha = file_sha256(model_path)
+    size = file_size_bytes(model_path)
+    return {
+        "status": "ok",
+        "model_type": model.get("type", "unknown"),
+        "model_path": str(model_path),
+        "model_size_bytes": size,
+        "model_sha256": sha,
+        "model_sha256_short": sha[:8] if sha else None,
+        "loaded_at_unix": int(time.time()),
+        "load_ms": loaded_ms,
+    }
+
+
 # ---------------------------
 # Optional S3 download support
 # ---------------------------
 def download_from_s3(s3_uri: str, local_path: Path) -> Path:
-    """
-    Download s3://bucket/key -> local_path
-    """
     u = urlparse(s3_uri)
     if u.scheme != "s3" or not u.netloc or not u.path:
         raise ValueError(f"Invalid S3 URI: {s3_uri}")
@@ -63,21 +76,9 @@ def download_from_s3(s3_uri: str, local_path: Path) -> Path:
 
 
 def resolve_model_path() -> Path:
-    """
-    Single source of truth for where the model should be loaded from.
-
-    Priority:
-      1) MODEL_PATH env var (explicit path inside container/host)
-      2) default repo path: ./models/model.pkl
-
-    Optional:
-      If MODEL_S3_URI is set, we download it to MODEL_PATH (or MODEL_LOCAL_PATH) before loading.
-    """
-    # Allow container/compose override (e.g., /tmp/model.pkl)
     env_model_path = os.getenv("MODEL_PATH")
     model_path = Path(env_model_path) if env_model_path else DEFAULT_MODEL_PATH
 
-    # Optional S3: download to model_path (or override with MODEL_LOCAL_PATH)
     s3_uri = os.getenv("MODEL_S3_URI")
     if s3_uri:
         local_override = os.getenv("MODEL_LOCAL_PATH")
@@ -91,21 +92,36 @@ def resolve_model_path() -> Path:
 def load_model_from_disk(model_path: Path) -> Dict[str, Any]:
     if not model_path.exists() or model_path.stat().st_size == 0:
         raise RuntimeError(f"Missing/empty model file: {model_path}")
+
     with model_path.open("rb") as f:
         obj = pickle.load(f)
 
-    # Your code assumes dict-like model with keys like "type", "user_top_products", "global_top_products"
     if not isinstance(obj, dict):
         raise RuntimeError(f"Loaded model is not a dict. Got: {type(obj)}")
 
     return obj
 
 
+def load_model_bundle() -> tuple[Dict[str, Any], Path, Dict[str, Any]]:
+    """
+    Loads model + computes metadata once.
+    Returns: (model, model_path, model_meta)
+    """
+    t0 = time.perf_counter()
+    model_path = resolve_model_path()
+    model = load_model_from_disk(model_path)
+    loaded_ms = int((time.perf_counter() - t0) * 1000)
+    meta = build_model_meta(model, model_path, loaded_ms)
+    return model, model_path, meta
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    model_path = resolve_model_path()
-    app.state.model_path = model_path
-    app.state.model = load_model_from_disk(model_path)
+    model, model_path, meta = load_model_bundle()
+    with model_lock:
+        app.state.model = model
+        app.state.model_path = model_path
+        app.state.model_meta = meta
     yield
 
 
@@ -118,62 +134,28 @@ class PredictRequest(BaseModel):
 
 @app.get("/health")
 def health(request: Request):
-    # Grab model and path safely
+    """
+    Liveness: FAST. No hashing, no disk reads.
+    """
     with model_lock:
-        m = request.app.state.model
-        model_path: Path = request.app.state.model_path
+        meta = getattr(request.app.state, "model_meta", None)
 
-    sha = file_sha256(model_path)
-    size = file_size_bytes(model_path)
-
-    return {
-        "status": "ok",
-        "model_type": m.get("type", "unknown"),
-        "model_path": str(model_path),
-        "model_size_bytes": size,
-        "model_sha256": sha,
-        "model_sha256_short": sha[:8] if sha else None,
-    }
+    # Even if model isn't ready, liveness can still be ok.
+    return meta or {"status": "ok", "service": "inference"}
 
 
-@app.post("/predict")
-def predict(req: PredictRequest, request: Request):
+@app.get("/ready")
+def ready(request: Request):
+    """
+    Readiness: only 200 when the model is actually loaded and metadata is present.
+    """
     with model_lock:
-        model = request.app.state.model
+        model = getattr(request.app.state, "model", None)
+        meta = getattr(request.app.state, "model_meta", None)
 
-    user_recs = model.get("user_top_products", {}).get(req.user_id)
-    if user_recs:
-        return {
-            "user_id": req.user_id,
-            "recommendations": user_recs[:5],
-            "reason": "personalized",
-        }
+    if model is None:
+        return {"status": "not_ready", "reason": "model_not_loaded"}
+    if not meta or not meta.get("model_sha256") or not meta.get("model_size_bytes"):
+        return {"status": "not_ready", "reason": "model_metadata_missing"}
 
-    return {
-        "user_id": req.user_id,
-        "recommendations": model.get("global_top_products", [])[:5],
-        "reason": "popular_fallback",
-    }
-
-
-@app.post("/reload-model")
-def reload_model(request: Request):
-    # Re-resolve in case S3 points to a new object or MODEL_PATH changed
-    model_path = resolve_model_path()
-    new_model = load_model_from_disk(model_path)
-
-    with model_lock:
-        request.app.state.model = new_model
-        request.app.state.model_path = model_path
-
-    sha = file_sha256(model_path)
-    size = file_size_bytes(model_path)
-
-    return {
-        "status": "reloaded",
-        "model_type": new_model.get("type", "unknown"),
-        "model_path": str(model_path),
-        "model_size_bytes": size,
-        "model_sha256": sha,
-        "model_sha256_short": sha[:8] if sha else None,
-    }
+    return {"status": "
