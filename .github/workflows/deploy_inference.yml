@@ -15,7 +15,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Pull model from S3 and restart inference on EC2
+      - name: Restart inference on EC2 and verify /ready + /model/info (Path A)
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.EC2_HOST }}
@@ -25,42 +25,33 @@ jobs:
             set -euo pipefail
 
             APP_DIR="/home/ubuntu/my-mlops-demo"
-            S3_URI="s3://thurmans-demo-models/mlops/models/model.pkl"
 
-            # Matches docker-compose mount: ./models/model.pkl:/tmp/model.pkl:ro
-            MODEL_DIR="${APP_DIR}/models"
-            MODEL_TMP="${MODEL_DIR}/model.pkl.tmp"
-            MODEL_DST="${MODEL_DIR}/model.pkl"
-
-            echo "[deploy-model] Pulling model from S3 -> ${MODEL_DST}"
-            mkdir -p "${MODEL_DIR}"
-            aws s3 cp "${S3_URI}" "${MODEL_TMP}"
-            test -s "${MODEL_TMP}"
-            mv -f "${MODEL_TMP}" "${MODEL_DST}"
-            ls -lah "${MODEL_DST}"
-
-            echo "[deploy-model] Pulling inference image + restarting inference only"
+            echo "[deploy] Restarting inference (Path A: inference pulls model from S3 via production.json)"
             cd "${APP_DIR}"
+
+            echo "[deploy] Pulling latest inference image"
             docker compose pull inference
+
+            echo "[deploy] Restarting inference container"
             docker compose up -d --no-deps --force-recreate inference
             docker compose ps inference
 
-            echo "[deploy-model] Waiting for inference to become ready..."
+            echo "[deploy] Waiting for inference to become ready..."
             for i in {1..20}; do
-              if curl -fsS "http://127.0.0.1:8000/ready" >/dev/null; then
-                echo "[deploy-model] Inference is ready ✅"
+              if curl -fsS --max-time 2 "http://127.0.0.1:8000/ready" >/dev/null; then
+                echo "[deploy] Inference is ready ✅"
                 break
               fi
-              echo "[deploy-model] Not ready yet... ($i/20)"
+              echo "[deploy] Not ready yet... ($i/20)"
               sleep 2
             done
 
-            echo "[deploy-model] /ready:"
-            curl -fsS "http://127.0.0.1:8000/ready" | cat
+            echo "[deploy] /ready:"
+            curl -fsS --max-time 5 "http://127.0.0.1:8000/ready" | cat
             echo
 
-            echo "[deploy-model] /model/info:"
-            curl -fsS "http://127.0.0.1:8000/model/info" | cat
+            echo "[deploy] /model/info:"
+            curl -fsS --max-time 5 "http://127.0.0.1:8000/model/info" | cat
             echo
 
-            echo "[deploy-model] Done ✅"
+            echo "[deploy] Done ✅"
