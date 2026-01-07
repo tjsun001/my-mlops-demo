@@ -1,0 +1,61 @@
+name: CI (seed-data only)
+
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 12 * * 1"   # weekly Monday
+
+
+jobs:
+  seed-data:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: demo
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: demo
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U demo"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v4
+        with:
+          python-version: 3.13
+
+      - name: Install dependencies
+        run: |
+          python -m venv venv
+          source venv/bin/activate
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Wait for Postgres
+        run: |
+          until pg_isready -h localhost -p 5432 -U demo; do
+            echo "Waiting for Postgres..."
+            sleep 2
+          done
+
+      - name: Run seed_data script
+        run: |
+          source venv/bin/activate
+          python scripts/seed_data.py
+        env:
+          POSTGRES_USER: demo
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: demo
+          POSTGRES_HOST: localhost
+          POSTGRES_PORT: 5432
+          PYTHONPATH: ${{ github.workspace }}
