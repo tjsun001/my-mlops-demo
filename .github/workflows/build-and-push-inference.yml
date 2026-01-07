@@ -59,3 +59,48 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+        smoke-test:
+    
+      - name: Smoke test (no deploy)
+        runs-on: ubuntu-latest
+        steps:
+          - name: Checkout
+            uses: actions/checkout@v4
+    
+          - name: Set up Docker Buildx
+            uses: docker/setup-buildx-action@v3
+    
+          - name: Build image (amd64, local load)
+            uses: docker/build-push-action@v6
+            with:
+              context: ./api
+              file: ./api/Dockerfile
+              platforms: linux/amd64
+              load: true
+              tags: inference-smoke:ci
+
+      - name: Run container
+        run: |
+          docker run -d --rm --name inference-smoke -p 8000:8000 \
+            -e PORT=8000 \
+            inference-smoke:ci
+
+      - name: Wait for /ready
+        run: |
+          set -e
+          for i in {1..30}; do
+            if curl -fsS "http://127.0.0.1:8000/ready" > /dev/null; then
+              echo "READY OK"
+              exit 0
+            fi
+            echo "waiting ($i)..."
+            sleep 2
+          done
+          echo "Service did not become ready"
+          docker logs inference-smoke || true
+          exit 1
+
+      - name: Optional:health
+        run: |
+          curl -fsS "http://127.0.0.1:8000/health"
+
