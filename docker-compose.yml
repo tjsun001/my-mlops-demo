@@ -10,9 +10,9 @@ services:
       - "5333:5432"
     networks: [amigos]
 
-  inference:
+  inference-service:
     container_name: inference
-    image: tjsun0001/my-mlops-demo-inference:prod-curl
+    image: tjsun0001/inference-service:prod-curl
     environment:
       AWS_REGION: us-east-1
       MODEL_PATH: /tmp/model.pkl
@@ -35,7 +35,7 @@ services:
       SPRING_DATASOURCE_URL: jdbc:postgresql://db:5432/jfs
       SPRING_DATASOURCE_USERNAME: amigoscode
       SPRING_DATASOURCE_PASSWORD: password
-      INFERENCE_BASE_URL: http://inference:8000
+      INFERENCE_BASE_URL: http://inference-service:8000
     ports:
       - "5050:5050"
     depends_on:
