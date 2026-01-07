@@ -14,11 +14,11 @@ concurrency:
 
 permissions:
   contents: read
-  id-token: write  # required for AWS OIDC
+  id-token: write
 
 env:
-  AWS_REGION: us-east-1
   IMAGE_NAME: inference-service
+  AWS_REGION: us-east-1
 
 jobs:
   build_and_push:
@@ -32,9 +32,9 @@ jobs:
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
-          aws-region: ${{ secrets.AWS_REGION || env.AWS_REGION }}
+          aws-region: ${{ env.AWS_REGION }}
 
-      - name: Log in to Amazon ECR
+      - name: Login to Amazon ECR
         uses: aws-actions/amazon-ecr-login@v2
 
       - name: Set up QEMU
@@ -43,13 +43,17 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      - name: Define ECR image URI
+        id: ecr
+        run: |
+          echo "IMAGE_URI=${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.IMAGE_NAME }}" >> $GITHUB_OUTPUT
+
       - name: Docker meta (tags/labels)
         id: meta
         uses: docker/metadata-action@v5
         with:
-          # ECR image URI
           images: |
-            ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION || env.AWS_REGION }}.amazonaws.com/${{ env.IMAGE_NAME }}
+            ${{ steps.ecr.outputs.IMAGE_URI }}
           tags: |
             type=raw,value=latest
             type=sha,format=short,prefix=sha-
