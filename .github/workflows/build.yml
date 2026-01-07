@@ -2,10 +2,10 @@ name: CI (seed-data only)
 
 
 on:
-  push:
-    branches:
-      - main
-  pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 12 * * 1"   # weekly Monday
+
 
 jobs:
   seed-data:
