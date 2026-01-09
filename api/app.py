@@ -352,8 +352,8 @@ def recommendations(req: PredictRequest, request: Request):
         "recommendations": recs,
         "source": "ml",
     }
-    @app.get("/recommendations/{user_id}")
-    def recommendations_get(user_id: int, request: Request):
-        # Compatibility route for callers that use GET /recommendations/{id}
-        return recommendations(PredictRequest(user_id=user_id), request)
+@app.get("/recommendations/{user_id}")
+def recommendations_get(user_id: int, request: Request):
+    # Compatibility route for callers that use GET /recommendations/{id}
+    return recommendations(PredictRequest(user_id=user_id), request)
 
